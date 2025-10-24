@@ -1,4 +1,0 @@
-﻿id,type,question,options,answer,audio_url,image_url,passage,difficulty,tags
-Q001,red,下列哪个是水果？,苹果||桌子||铅笔||椅子,苹果,,,,1,"词汇,基础"
-Q002,green,根据短文选择答案：小明想去哪里？,书店||饭店||银行,书店,,,小明想买一本词典，于是问路人：请问书店怎么走？,2,"阅读,方向"
-Q003,yellow,图片所示的交通工具是什么？,飞机||火车||轮船,飞机,,https://upload.wikimedia.org/wikipedia/commons/5/5d/Airplane_silhouette.png,,3,"图片,识别"
