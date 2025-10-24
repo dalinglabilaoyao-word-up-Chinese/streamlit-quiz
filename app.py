@@ -8,7 +8,7 @@ import streamlit as st
 # ===============================
 # Page setup
 # ===============================
-st.set_page_config(page_title="Chinese Words Board Game", page_icon="🏮", layout="centered")
+st.set_page_config(page_title="Chinese Words Board Game", page_icon="🎋", layout="centered")
 
 APP_TITLE = "Chinese Words Board Game"
 DEFAULT_ALL = "questions_all.csv"   # 聚合自 /levels/*.csv
@@ -18,63 +18,79 @@ TYPE_OPTIONS = ["all", "red", "green", "yellow", "blue"]
 DIFF_MIN, DIFF_MAX = 1, 10
 
 # ===============================
-# 🏮 Red-Gold Chinese Theme (CSS)
+# 🎋 Bamboo Academy (竹青书院) Theme (CSS)
 # ===============================
 THEME_CSS = """
 <style>
-/* 背景：中式红金渐变 */
+:root {
+  --ink: #24342e;          /* 墨绿 */
+  --ink-2: #3b4a44;
+  --bamboo: #2e7d6b;       /* 竹青 */
+  --bamboo-light: #cfe8df; /* 竹青浅 */
+  --paper: #f7f4ef;        /* 宣纸色 */
+  --gold: #bba764;         /* 淡金 */
+  --accent: #4aa382;       /* 点缀绿 */
+}
+/* 背景：宣纸+淡青渐变 */
 [data-testid="stAppViewContainer"] {
-  background: radial-gradient(1200px 600px at 10% -10%, #8b0000 0%, #7a0000 35%, #4c0000 70%, #2a0000 100%);
+  background: radial-gradient(1000px 600px at 20% -10%, var(--bamboo-light) 0%, #f9f7f2 55%, var(--paper) 100%);
   background-attachment: fixed;
 }
-/* 主内容白色半透明卡片容器 */
+/* 主区内容：卡片化 */
 [data-testid="stAppViewContainer"] .main {
-  background: rgba(255, 255, 255, 0.92);
+  background: rgba(255, 255, 255, 0.86);
   border-radius: 18px;
-  box-shadow: 0 12px 28px rgba(0,0,0,0.20);
-  padding: 1.2rem;
+  box-shadow: 0 10px 26px rgba(36,52,46,0.08);
+  padding: 1.1rem;
 }
-/* 侧边栏：暗红背景 + 金色文字 */
+/* 侧边栏：竹青到墨绿渐变 */
 [data-testid="stSidebar"] {
-  background: linear-gradient(180deg, #4c0000 0%, #300000 100%);
+  background: linear-gradient(180deg, #2e7d6b 0%, #254c43 100%);
 }
-[data-testid="stSidebar"] * {
-  color: #f7e9c0 !important;
-}
+[data-testid="stSidebar"] * { color: #eef6f2 !important; }
 [data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3 {
-  color: #ffd166 !important;
+  color: #e9f5ef !important;
 }
-/* 主区标题与文字 */
-h1, h2, h3 { color: #7a1010; letter-spacing: 0.5px; }
-p, label, span, div, li { color: #333; }
-/* 按钮：红金渐变 */
+/* 标题与正文 */
+h1, h2, h3 { color: var(--ink); letter-spacing: 0.2px; }
+p, label, span, div, li { color: var(--ink-2); }
+/* 按钮：竹青 → 浅金 渐变 */
 .stButton > button {
-  background: linear-gradient(135deg, #b71c1c 0%, #e53935 40%, #ffb300 100%);
-  color: #ffeeca; border: none; border-radius: 12px;
-  padding: 0.6rem 0.9rem; font-weight: 700; letter-spacing: 0.3px;
-  box-shadow: 0 6px 16px rgba(183,28,28,0.35);
+  background: linear-gradient(135deg, #2e7d6b 0%, #4aa382 60%, #c7b98a 100%);
+  color: #0f1b17;
+  border: none;
+  border-radius: 12px;
+  padding: 0.55rem 0.9rem;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  box-shadow: 0 6px 16px rgba(46,125,107,0.22);
   transition: transform 0.12s ease, box-shadow 0.2s ease, filter 0.2s ease;
 }
 .stButton > button:hover {
   transform: translateY(-1px);
-  box-shadow: 0 10px 22px rgba(183,28,28,0.45);
-  filter: brightness(1.03);
+  box-shadow: 0 10px 20px rgba(46,125,107,0.28);
+  filter: brightness(1.02);
 }
-.stButton > button:active { transform: translateY(0px) scale(0.99); }
+/* 输入控件：圆角+细金边 */
+.stSelectbox, .stMultiSelect, .stTextInput, .stSlider { border-radius: 12px; }
+div[data-baseweb="select"] > div, .stTextInput > div > div > input {
+  border-radius: 10px !important;
+  box-shadow: inset 0 0 0 1px rgba(187,167,100,0.55) !important;
+}
 /* 表格卡片化 */
 [data-testid="stDataFrame"] {
   background: rgba(255,255,255,0.95);
   border-radius: 14px;
-  box-shadow: 0 6px 18px rgba(0,0,0,0.08);
+  box-shadow: 0 6px 16px rgba(36,52,46,0.08);
   padding: 0.4rem;
 }
-/* 输入控件圆角 + 金色描边 */
-.stSelectbox, .stMultiSelect, .stTextInput, .stSlider { border-radius: 12px; }
-div[data-baseweb="select"] > div, .stTextInput > div > div > input {
-  border-radius: 10px !important;
-  box-shadow: inset 0 0 0 1px rgba(255,179,0,0.55) !important;
+/* 分割线 */
+hr, .stMarkdown hr {
+  border: none;
+  height: 1px;
+  background: linear-gradient(to right, rgba(36,52,46,0), rgba(36,52,46,0.35), rgba(36,52,46,0));
 }
-/* 提示/告警样式 */
+/* 提示框 */
 .stAlert { border-radius: 12px; }
 </style>
 """
@@ -258,7 +274,7 @@ with st.sidebar:
 # Main UI
 # ===============================
 st.title(APP_TITLE)
-st.caption("🏮 红金中式主题 · 分级题库自动汇总 · 移动端优化")
+st.caption("🎋 竹青书院 · 柔和雅致 · 分级题库自动汇总 · 移动端优化")
 
 # 当前筛选后的题库
 df = st.session_state.df
@@ -393,4 +409,4 @@ with colC:
 
 st.dataframe(hist_df, use_container_width=True, height=320)
 
-st.caption("© Chinese Words Board Game · 红金中式主题")
+st.caption("© Chinese Words Board Game · 竹青书院主题")
