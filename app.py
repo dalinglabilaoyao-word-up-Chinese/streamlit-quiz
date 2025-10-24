@@ -85,7 +85,7 @@ def filter_df(df, qtype, selected_diffs, tag_query):
     return f.reset_index(drop=True)
 
 def draw_one(df, avoid_ids):
-    pool = df[~df["id"].isin(avoid_ids)]
+    pool = df[~df["id"].astype(str).isin(set(map(str, avoid_ids)))]
     if len(pool) == 0:
         return None
     return pool.sample(1).iloc[0].to_dict()
@@ -123,26 +123,17 @@ def get_stable_options(qid: str, raw_options: list) -> list:
         cache[qid] = tmp
     return cache[qid]
 
-# A small helper to normalize multiselect "all" logic
+# Normalize multiselect (all + numbers)
 def normalize_diff_selection(selection, *, all_label="all"):
-    """Rules:
-    - empty -> select ALL
-    - if 'all' selected together with numbers -> drop 'all' and keep numbers
-    - if only 'all' -> select ALL
-    Return list[int] in DIFF_MIN..DIFF_MAX and a canonical UI list[str] for the widget.
-    """
     if not selection:
-        ints = list(range(DIFF_MIN, DIFF_MAX+1))
-        ui = [all_label]
+        ints = list(range(DIFF_MIN, DIFF_MAX+1)); ui = [all_label]
         return ints, ui
     sel_set = set(selection)
     if all_label in sel_set and len(sel_set) > 1:
-        sel_set.discard(all_label)  # prefer explicit numbers
+        sel_set.discard(all_label)
     if sel_set == {all_label}:
-        ints = list(range(DIFF_MIN, DIFF_MAX+1))
-        ui = [all_label]
+        ints = list(range(DIFF_MIN, DIFF_MAX+1)); ui = [all_label]
         return ints, ui
-    # keep numbers only
     nums = []
     for s in sel_set:
         try:
@@ -152,11 +143,9 @@ def normalize_diff_selection(selection, *, all_label="all"):
     nums = [n for n in nums if DIFF_MIN <= n <= DIFF_MAX]
     nums.sort()
     if not nums:
-        ints = list(range(DIFF_MIN, DIFF_MAX+1))
-        ui = [all_label]
+        ints = list(range(DIFF_MIN, DIFF_MAX+1)); ui = [all_label]
     else:
-        ints = nums
-        ui = [str(n) for n in nums]
+        ints = nums; ui = [str(n) for n in nums]
     return ints, ui
 
 # =====================================
@@ -207,7 +196,7 @@ with st.sidebar:
     st.selectbox("题型", TYPE_OPTIONS, index=TYPE_OPTIONS.index(st.session_state.qtype_effective),
                  key="qtype_sb", on_change=on_change_qtype_sb)
 
-    # Difficulty dropdown (multiselect with 'all'), fixed logic
+    # Difficulty dropdown (multiselect with 'all')
     mult_opts = ["all"] + [str(i) for i in range(DIFF_MIN, DIFF_MAX+1)]
     def on_change_diff_multi_sb():
         ints, ui = normalize_diff_selection(st.session_state.diff_multi_sb, all_label="all")
@@ -225,7 +214,7 @@ with st.sidebar:
     st.checkbox("打乱选项顺序", value=st.session_state.shuffle_opts, key="shuffle_opts")
     st.checkbox("抽题不重复（直到重置）", value=st.session_state.no_repeat, key="no_repeat")
 
-    if st.button("🗑️ 重置抽题记录"):
+    if st.button("🗑️ 重置抽题记录（侧边栏）"):
         st.session_state.seen_ids = set()
         st.session_state.history = []
         st.session_state.current = None
@@ -266,21 +255,31 @@ with col2:
     st.multiselect("难度（下拉多选）", mult_opts_m, default=st.session_state.diff_ui_main,
                    key="diff_multi_main", on_change=on_change_diff_multi_main)
 
-# Current filters
+# Current filters and counters
 pool = filter_df(st.session_state.df, st.session_state.qtype_effective, st.session_state.diff_selected, st.session_state.tag_query)
-sel_text = "全部" if st.session_state.diff_selected == list(range(DIFF_MIN, DIFF_MAX+1)) else ",".join(map(str, st.session_state.diff_selected))
+total_count = len(pool)
+pool_ids = set(map(str, pool["id"])) if total_count else set()
+seen_in_pool = len(set(map(str, st.session_state.seen_ids)) & pool_ids)
+remaining_count = max(0, total_count - seen_in_pool)
 
 st.subheader("🎲 抽题区")
-st.caption(f"筛选：类型 **{st.session_state.qtype_effective}** · 难度 **{sel_text}** · 标签包含 **{st.session_state.tag_query or '（无）'}**")
-st.caption(f"题目数量：{len(pool)}")
+st.caption(f"题目数量：{total_count}　已抽取：{seen_in_pool}　剩余：{remaining_count}")
 
-# Mobile export button
-if st.session_state.history:
-    hist = pd.DataFrame(st.session_state.history,
-                        columns=["time","id","type","question","user_answer","correct_answer","correct"])
-    st.download_button("⬇️ 导出作答记录 CSV（手机端）",
-                       hist.to_csv(index=False).encode("utf-8-sig"),
-                       file_name="history.csv", mime="text/csv")
+# Main reset button (mobile-friendly)
+col_reset1, col_reset2 = st.columns([1,2])
+with col_reset1:
+    if st.button("♻️ 重置题目", use_container_width=True):
+        st.session_state.seen_ids = set()
+        st.session_state.current = None
+        st.session_state.shuffled_options = {}
+        st.success("已重置当前筛选下的抽题状态。")
+with col_reset2:
+    if st.session_state.history:
+        hist = pd.DataFrame(st.session_state.history,
+                            columns=["time","id","type","question","user_answer","correct_answer","correct"])
+        st.download_button("⬇️ 导出作答记录 CSV（手机端）",
+                           hist.to_csv(index=False).encode("utf-8-sig"),
+                           file_name="history.csv", mime="text/csv")
 
 # Draw controls
 def ensure_stable_options_for(row):
@@ -300,7 +299,7 @@ if st.button("🎲 抽 1 题", use_container_width=True):
         st.warning("没有可抽的题目了。请重置抽题记录或更改筛选条件。")
     else:
         st.session_state.current = row
-        st.session_state.seen_ids.add(row["id"])
+        st.session_state.seen_ids.add(str(row["id"]))
         ensure_stable_options_for(row)
 
 current = st.session_state.current
@@ -356,8 +355,8 @@ if current:
             st.warning("没有可抽的题目了。请重置抽题记录或更改筛选条件。")
         else:
             st.session_state.current = row
-            st.session_state.seen_ids.add(row["id"])
+            st.session_state.seen_ids.add(str(row["id"]))
             ensure_stable_options_for(row)
 
 st.markdown("---")
-st.caption("题型 red/green/yellow/blue · 难度 1–10 下拉多选（修复“只能选全部”的问题） · 分级题库自动汇总。")
+st.caption("题型 red/green/yellow/blue · 难度 1–10 下拉多选 · 显示已抽取/剩余数量 · 主界面支持“重置题目”。")
