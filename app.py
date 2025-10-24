@@ -1,139 +1,378 @@
+
 import os
 import time
 import random
 import pandas as pd
 import streamlit as st
 
-# 页面设置
+# =====================================
+# Page setup
+# =====================================
 st.set_page_config(page_title="Chinese Words Board Game", page_icon="🀄", layout="centered")
 
 APP_TITLE = "Chinese Words Board Game"
-DEFAULT_ALL = "questions_all.csv"
-DEFAULT_CSV = "questions.csv"
+DEFAULT_ALL = "questions_all.csv"   # aggregated from /levels/*.csv
+DEFAULT_CSV = "questions.csv"       # alias to ALL
 LEVEL_DIR = "levels"
 TYPE_OPTIONS = ["all", "red", "green", "yellow", "blue"]
 DIFF_MIN, DIFF_MAX = 1, 10
+DIFF_ALL = list(range(DIFF_MIN, DIFF_MAX + 1))
 
-# ========== 聚合分级题库 ==========
+# =====================================
+# Aggregation helpers
+# =====================================
 def list_level_files():
-    return [os.path.join(LEVEL_DIR, f"questions_level_{i}.csv") for i in range(DIFF_MIN, DIFF_MAX + 1)]
+    return [os.path.join(LEVEL_DIR, f"questions_level_{i}.csv") for i in range(DIFF_MIN, DIFF_MAX+1)]
 
-def rebuild_all_from_levels():
+def rebuild_all_from_levels(write_to_all=True):
     frames = []
     for p in list_level_files():
         if os.path.exists(p):
             try:
                 frames.append(pd.read_csv(p))
             except Exception as e:
-                st.warning(f"读取失败：{p} ({e})")
-    df = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
-    if not df.empty:
-        df.to_csv(DEFAULT_ALL, index=False, encoding="utf-8-sig")
-        df.to_csv(DEFAULT_CSV, index=False, encoding="utf-8-sig")
+                st.warning(f"读取失败：{p}（{e}）")
+    if frames:
+        df = pd.concat(frames, ignore_index=True)
+    else:
+        df = pd.DataFrame(columns=["id","type","question","answer","options","audio_url","image_url","passage","difficulty","tags"])
+    # ensure columns
+    for col in ["id","type","question","answer","options","audio_url","image_url","passage","difficulty","tags"]:
+        if col not in df.columns:
+            df[col] = ""
+    if write_to_all:
+        try:
+            df.to_csv(DEFAULT_ALL, index=False, encoding="utf-8-sig")
+            # also refresh questions.csv as alias
+            df.to_csv(DEFAULT_CSV, index=False, encoding="utf-8-sig")
+        except Exception as e:
+            st.warning(f"写入全量题库失败：{e}")
     return df
 
-# ========== 数据加载 ==========
+# =====================================
+# Data helpers
+# =====================================
 @st.cache_data
-def load_questions(path: str):
-    if not os.path.exists(path):
-        return pd.DataFrame(columns=["id","type","question","answer","options","audio_url","image_url","passage","difficulty","tags"])
+def load_questions(path: str) -> pd.DataFrame:
     df = pd.read_csv(path)
-    if "difficulty" not in df.columns:
-        df["difficulty"] = 1
-    df["difficulty_num"] = df["difficulty"].apply(lambda x: int(x) if str(x).isdigit() else 1)
+    for col in ["id","type","question","answer","options","audio_url","image_url","passage","difficulty","tags"]:
+        if col not in df.columns:
+            df[col] = ""
+    df = df.fillna("")
+    # normalize
+    df["type"] = df["type"].astype(str).str.strip()
+    # difficulty to int 1..10
+    def _to_diff(x):
+        try:
+            v = int(str(x).strip())
+        except Exception:
+            v = 1
+        return max(DIFF_MIN, min(DIFF_MAX, v))
+    df["difficulty_num"] = df["difficulty"].apply(_to_diff)
     return df
 
-# ========== 初始化状态 ==========
+def parse_options(opt_str: str):
+    return [o.strip() for o in str(opt_str).split("||") if str(o).strip()]
+
+def filter_df(df, qtype, selected_diffs, tag_query):
+    f = df.copy()
+    if qtype and qtype != "all":
+        f = f[f["type"].str.lower() == qtype.lower()]
+    if selected_diffs:
+        f = f[f["difficulty_num"].isin(selected_diffs)]
+    if tag_query:
+        f = f[f["tags"].str.contains(tag_query, case=False, na=False)]
+    return f.reset_index(drop=True)
+
+def draw_one(df, avoid_ids):
+    pool = df[~df["id"].astype(str).isin(set(map(str, avoid_ids)))]
+    if len(pool) == 0:
+        return None
+    return pool.sample(1).iloc[0].to_dict()
+
+def play_audio(src: str):
+    if not src: return
+    src = str(src).strip()
+    if src.startswith("http"):
+        st.audio(src)
+    else:
+        try:
+            with open(src, "rb") as f:
+                st.audio(f.read())
+        except Exception as e:
+            st.warning(f"音频无法读取：{src} ({e})")
+
+def show_image(src: str):
+    if not src: return
+    src = str(src).strip()
+    if src.startswith("http") or os.path.exists(src):
+        st.image(src, use_column_width=True)
+    else:
+        st.warning(f"图片未找到：{src}")
+
+# stable shuffled options per question id
+def get_stable_options(qid: str, raw_options: list) -> list:
+    if not raw_options:
+        return []
+    if not st.session_state.shuffle_opts:
+        return raw_options
+    cache = st.session_state.shuffled_options
+    if qid not in cache or not cache[qid]:
+        tmp = raw_options[:]
+        random.shuffle(tmp)
+        cache[qid] = tmp
+    return cache[qid]
+
+# Normalize multiselect (all + numbers)
+def normalize_diff_selection(selection, *, all_label="all"):
+    if not selection:
+        ints = list(range(DIFF_MIN, DIFF_MAX+1)); ui = [all_label]
+        return ints, ui
+    sel_set = set(selection)
+    if all_label in sel_set and len(sel_set) > 1:
+        sel_set.discard(all_label)
+    if sel_set == {all_label}:
+        ints = list(range(DIFF_MIN, DIFF_MAX+1)); ui = [all_label]
+        return ints, ui
+    nums = []
+    for s in sel_set:
+        try:
+            nums.append(int(s))
+        except:
+            pass
+    nums = [n for n in nums if DIFF_MIN <= n <= DIFF_MAX]
+    nums.sort()
+    if not nums:
+        ints = list(range(DIFF_MIN, DIFF_MAX+1)); ui = [all_label]
+    else:
+        ints = nums; ui = [str(n) for n in nums]
+    return ints, ui
+
+# =====================================
+# State init
+# =====================================
 def init_state():
-    rebuild_all_from_levels()
-    st.session_state.setdefault("df", load_questions(DEFAULT_ALL))
-    st.session_state.setdefault("seen_ids", set())
-    st.session_state.setdefault("history", [])
-    st.session_state.setdefault("current", None)
-    st.session_state.setdefault("qtype_effective", "all")
-    st.session_state.setdefault("diff_selected", list(range(DIFF_MIN, DIFF_MAX + 1)))
+    ss = st.session_state
+    # always rebuild ALL from levels at startup to keep in sync
+    rebuild_all_from_levels(write_to_all=True)
+    ss.setdefault("df", load_questions(DEFAULT_ALL))
+    ss.setdefault("seen_ids", set())
+    ss.setdefault("history", [])
+    ss.setdefault("qtype_effective", "all")
+    ss.setdefault("diff_selected", list(range(DIFF_MIN, DIFF_MAX+1)))
+    ss.setdefault("diff_ui_sb", ["all"])
+    ss.setdefault("diff_ui_main", ["all"])
+    ss.setdefault("tag_query", "")
+    ss.setdefault("current", None)
+    ss.setdefault("shuffle_opts", True)
+    ss.setdefault("no_repeat", True)
+    ss.setdefault("shuffled_options", {})
 
 init_state()
 
-# ========== 主体 ==========
+# =====================================
+# Sidebar (desktop)
+# =====================================
+with st.sidebar:
+    st.header("🧰 设置")
+    # Upload level files (optional)
+    with st.expander("📥 上传/替换分级题库（1–10）"):
+        for i in range(DIFF_MIN, DIFF_MAX+1):
+            up = st.file_uploader(f"等级 {i} 题库 CSV", type=["csv"], key=f"uploader_level_{i}")
+            if up is not None:
+                os.makedirs(LEVEL_DIR, exist_ok=True)
+                path = os.path.join(LEVEL_DIR, f"questions_level_{i}.csv")
+                with open(path, "wb") as f:
+                    f.write(up.getbuffer())
+                st.success(f"已更新：{path}")
+        if st.button("🔄 重新构建全量题库"):
+            st.session_state.df = rebuild_all_from_levels(write_to_all=True)
+            st.cache_data.clear()
+            st.success("已根据分级题库重建全量题库")
+
+    # Type select
+    def on_change_qtype_sb():
+        st.session_state.qtype_effective = st.session_state.qtype_sb
+    st.selectbox("题型", TYPE_OPTIONS, index=TYPE_OPTIONS.index(st.session_state.qtype_effective),
+                 key="qtype_sb", on_change=on_change_qtype_sb)
+
+    # Difficulty dropdown (multiselect with 'all')
+    mult_opts = ["all"] + [str(i) for i in range(DIFF_MIN, DIFF_MAX+1)]
+    def on_change_diff_multi_sb():
+        ints, ui = normalize_diff_selection(st.session_state.diff_multi_sb, all_label="all")
+        st.session_state.diff_selected = ints
+        st.session_state.diff_ui_sb = ui
+        st.session_state.diff_ui_main = ui
+    st.multiselect("难度（下拉多选）", mult_opts, default=st.session_state.diff_ui_sb,
+                   key="diff_multi_sb", on_change=on_change_diff_multi_sb, help="可选“all”，或勾选任意多个难度")
+
+    # Tag filter
+    def on_change_tag_sb():
+        st.session_state.tag_query = st.session_state.tag_sb
+    st.text_input("标签筛选（包含关系）", value=st.session_state.tag_query, key="tag_sb", on_change=on_change_tag_sb)
+
+    st.checkbox("打乱选项顺序", value=st.session_state.shuffle_opts, key="shuffle_opts")
+    st.checkbox("抽题不重复（直到重置）", value=st.session_state.no_repeat, key="no_repeat")
+
+    if st.button("🗑️ 重置抽题记录（侧边栏）"):
+        st.session_state.seen_ids = set()
+        st.session_state.history = []
+        st.session_state.current = None
+        st.session_state.shuffled_options = {}
+        st.success("抽题记录已重置。")
+
+    # Desktop export (always visible)
+    hist_df = pd.DataFrame(st.session_state.history,
+                           columns=["time","id","type","question","user_answer","correct_answer","correct"])
+    st.download_button("⬇️ 导出作答记录 CSV（桌面）",
+                       hist_df.to_csv(index=False).encode("utf-8-sig"),
+                       file_name="history.csv", mime="text/csv")
+
+# =====================================
+# Main UI (mobile quick controls)
+# =====================================
 st.title(APP_TITLE)
+st.caption("说明：支持分级题库自动汇总；手机端也可导出作答记录，并在下方表格实时查看作答。")
 
-# 题型 & 难度选择
+st.markdown("### 📱 移动端快速选择")
 col1, col2 = st.columns(2)
+
 with col1:
-    st.session_state.qtype_effective = st.selectbox("题型", TYPE_OPTIONS, index=0)
+    def on_change_qtype_main():
+        st.session_state.qtype_effective = st.session_state.qtype_main
+        st.session_state.qtype_sb = st.session_state.qtype_main
+    st.selectbox("题型", TYPE_OPTIONS, index=TYPE_OPTIONS.index(st.session_state.qtype_effective),
+                 key="qtype_main", on_change=on_change_qtype_main)
+
 with col2:
-    selected_diff = st.multiselect("难度（1-10）", list(range(1, 11)), default=list(range(1, 11)))
-    st.session_state.diff_selected = selected_diff if selected_diff else list(range(1, 11))
+    mult_opts_m = ["all"] + [str(i) for i in range(DIFF_MIN, DIFF_MAX+1)]
+    def on_change_diff_multi_main():
+        ints, ui = normalize_diff_selection(st.session_state.diff_multi_main, all_label="all")
+        st.session_state.diff_selected = ints
+        st.session_state.diff_ui_main = ui
+        st.session_state.diff_ui_sb = ui
+    st.multiselect("难度（下拉多选）", mult_opts_m, default=st.session_state.diff_ui_main,
+                   key="diff_multi_main", on_change=on_change_diff_multi_main)
 
-# 过滤题库
-df = st.session_state.df
-if not df.empty:
-    filtered = df[(df["type"].isin([st.session_state.qtype_effective]) if st.session_state.qtype_effective != "all" else True) &
-                  (df["difficulty_num"].isin(st.session_state.diff_selected))]
-else:
-    filtered = df
+# Current filters and counters
+pool = filter_df(st.session_state.df, st.session_state.qtype_effective, st.session_state.diff_selected, st.session_state.tag_query)
+total_count = len(pool)
+pool_ids = set(map(str, pool["id"])) if total_count else set()
+seen_in_pool = len(set(map(str, st.session_state.seen_ids)) & pool_ids)
+remaining_count = max(0, total_count - seen_in_pool)
 
-# 统计
-total = len(filtered)
-seen = len(st.session_state.seen_ids & set(filtered["id"]))
-remain = max(0, total - seen)
-st.caption(f"题目数量：{total}　已抽取：{seen}　剩余：{remain}")
+st.subheader("🎲 抽题区")
+st.caption(f"题目数量：{total_count}　已抽取：{seen_in_pool}　剩余：{remaining_count}")
 
-# 抽题与重置
-c1, c2 = st.columns([1, 1])
-with c1:
-    if st.button("🎲 抽 1 题", use_container_width=True):
-        pool = filtered[~filtered["id"].isin(st.session_state.seen_ids)]
-        if len(pool) == 0:
-            st.warning("没有可抽的题目了！请重置。")
-        else:
-            q = pool.sample(1).iloc[0]
-            st.session_state.current = q
-            st.session_state.seen_ids.add(q["id"])
-with c2:
+# Main reset + mobile export
+c0, c1 = st.columns([1,2])
+with c0:
     if st.button("♻️ 重置题目", use_container_width=True):
         st.session_state.seen_ids = set()
         st.session_state.current = None
-        st.success("已重置题目！")
+        st.session_state.shuffled_options = {}
+        st.success("已重置当前筛选下的抽题状态。")
+with c1:
+    st.download_button("⬇️ 导出作答记录 CSV（手机端）",
+                       pd.DataFrame(st.session_state.history, columns=["time","id","type","question","user_answer","correct_answer","correct"]).to_csv(index=False).encode("utf-8-sig"),
+                       file_name="history.csv", mime="text/csv")
 
-# 显示题目
-if st.session_state.current is not None:
-    q = st.session_state.current
-    st.markdown(f"**题号**：{q['id']}　**类型**：{q['type']}　**难度**：{q['difficulty']}")
-    st.markdown(f"**题目**：{q['question']}")
-    options = str(q.get("options", "")).split("||")
-    if len(options) > 1:
-        ans = st.radio("请选择答案：", options, key=f"ans_{q['id']}")
+# Draw controls
+def ensure_stable_options_for(row):
+    opts_raw = parse_options(row.get("options",""))
+    if opts_raw:
+        key = row["id"]
+        if key not in st.session_state.shuffled_options or not st.session_state.shuffled_options[key]:
+            tmp = opts_raw[:]
+            if st.session_state.shuffle_opts:
+                random.shuffle(tmp)
+            st.session_state.shuffled_options[key] = tmp
+
+if st.button("🎲 抽 1 题", use_container_width=True):
+    avoid = st.session_state.seen_ids if st.session_state.no_repeat else set()
+    row = draw_one(pool, avoid)
+    if row is None:
+        st.warning("没有可抽的题目了。请重置抽题记录或更改筛选条件。")
     else:
-        ans = st.text_input("请输入答案：", key=f"txt_{q['id']}")
-    if st.button("✅ 提交答案", use_container_width=True):
-        correct = q["answer"]
-        st.session_state.history.append({
-            "时间": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "题号": q["id"],
-            "类型": q["type"],
-            "题目": q["question"],
-            "我的答案": ans,
-            "正确答案": correct,
-            "是否正确": ans.strip() == str(correct).strip()
-        })
-        st.success("已提交答案！")
+        st.session_state.current = row
+        st.session_state.seen_ids.add(str(row["id"]))
+        ensure_stable_options_for(row)
 
-# 实时作答结果表格
+current = st.session_state.current
+if current:
+    st.markdown(f"**编号**：`{current['id']}`　**类型**：`{current['type']}`　**难度**：`{current.get('difficulty_num', current.get('difficulty',''))}`")
+    st.markdown(f"**题目**：{current['question']}")
+
+    if current.get("passage"):
+        with st.expander("📖 阅读短文（点击展开）", expanded=True):
+            st.write(current["passage"])
+    show_image(current.get("image_url",""))
+    play_audio(current.get("audio_url",""))
+
+    # Options
+    opts = st.session_state.shuffled_options.get(current["id"], parse_options(current.get("options","")))
+    user_answer = None
+    if opts:
+        user_answer = st.radio("请选择你的答案：", opts, index=None, key=f"radio_{current['id']}")
+    else:
+        user_answer = st.text_area("你的答案：", height=120, placeholder="在此输入……（主观题不自动判分）", key=f"text_{current['id']}")
+
+    c1, c2, c3 = st.columns(3)
+    if c1.button("✅ 提交答案", use_container_width=True, key=f"submit_{current['id']}"):
+        if user_answer is None or (isinstance(user_answer, str) and len(user_answer.strip())==0):
+            st.warning("请先作答。")
+        else:
+            correct_answer = current.get("answer","").strip()
+            is_select = bool(opts)
+            is_correct = (str(user_answer).strip() == correct_answer) if is_select else None
+            if is_correct is True:
+                st.success("回答正确！🎉")
+            elif is_correct is False:
+                st.error(f"回答不正确。正确答案：{correct_answer}")
+            else:
+                st.info("已记录你的回答（主观题不自动判分）。")
+            st.session_state.history.append([
+                time.strftime("%Y-%m-%d %H:%M:%S"),
+                current["id"],
+                current["type"],
+                current["question"],
+                str(user_answer),
+                correct_answer,
+                None if is_correct is None else bool(is_correct)
+            ])
+
+    if c2.button("👀 显示参考答案", use_container_width=True, key=f"show_{current['id']}"):
+        st.info(current.get("answer","（无参考答案）"))
+
+    if c3.button("➡️ 下一题", use_container_width=True, key=f"next_{current['id']}"):
+        avoid = st.session_state.seen_ids if st.session_state.no_repeat else set()
+        row = draw_one(pool, avoid)
+        if row is None:
+            st.warning("没有可抽的题目了。请重置抽题记录或更改筛选条件。")
+        else:
+            st.session_state.current = row
+            st.session_state.seen_ids.add(str(row["id"]))
+            ensure_stable_options_for(row)
+
+# =====================================
+# Live results table (always visible)
+# =====================================
 st.markdown("## 📊 实时作答结果")
-hist_df = pd.DataFrame(st.session_state.history)
-if not hist_df.empty:
-    hist_df.insert(0, "编号", range(1, len(hist_df)+1))
-else:
-    hist_df = pd.DataFrame(columns=["编号","时间","题号","类型","题目","我的答案","正确答案","是否正确"])
-
-colA, colB = st.columns([1, 1])
-with colA:
+hist_cols = ["time","id","type","question","user_answer","correct_answer","correct"]
+hist_df = pd.DataFrame(st.session_state.history, columns=hist_cols)
+# A small toolbar
+col_a, col_b, col_c = st.columns([1,1,2])
+with col_a:
     if st.button("🧹 清空记录"):
         st.session_state.history = []
-        st.success("已清空！")
-with colB:
-    st.download_button("⬇️ 导出 CSV", hist_df.to_csv(index=False).encode("utf-8-sig"), "history.csv", "text/csv")
+        st.success("已清空历史记录。")
+with col_b:
+    st.download_button("⬇️ 导出 CSV",
+                       hist_df.to_csv(index=False).encode("utf-8-sig"),
+                       file_name="history.csv", mime="text/csv")
+with col_c:
+    st.caption(f"记录条数：{len(hist_df)}")
+st.dataframe(hist_df, use_container_width=True, height=280)
 
-st.dataframe(hist_df, use_container_width=True, height=300)
+st.markdown("---")
+st.caption("题型 red/green/yellow/blue · 难度 1–10 下拉多选 · 实时表格显示作答结果。")
