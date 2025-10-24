@@ -8,7 +8,7 @@ import streamlit as st
 # ===============================
 # Page setup (mobile friendly)
 # ===============================
-st.set_page_config(page_title="抽题游戏（移动端优化）", page_icon="🎲", layout="centered")
+st.set_page_config(page_title="抽题游戏（移动端优化·修复选择问题）", page_icon="🎲", layout="centered")
 
 APP_TITLE = "🎯 随机抽题小游戏（移动端优化 · 支持 red/green/yellow/blue）"
 DEFAULT_CSV = "questions.csv"
@@ -87,8 +87,25 @@ def init_state():
     ss.setdefault("current", None)
     ss.setdefault("shuffle_opts", True)
     ss.setdefault("no_repeat", True)
+    # stable shuffled options cache per question id
+    ss.setdefault("shuffled_options", {})  # {id: [opt1,opt2,...]}
 
 init_state()
+
+def get_stable_options(qid: str, raw_options: list) -> list:
+    """Return a stable (per-question) option order to avoid Streamlit losing state.
+    If shuffle is enabled, shuffle once and cache by qid; otherwise use raw order.
+    """
+    if not raw_options:
+        return []
+    if not st.session_state.shuffle_opts:
+        return raw_options
+    cache = st.session_state.shuffled_options
+    if qid not in cache or not cache[qid]:
+        tmp = raw_options[:]
+        random.shuffle(tmp)
+        cache[qid] = tmp
+    return cache[qid]
 
 # ===============================
 # Sidebar controls (desktop)
@@ -99,6 +116,10 @@ with st.sidebar:
     if uploaded is not None:
         st.session_state.df = pd.read_csv(uploaded)
         st.success("已加载上传的题库！")
+        # 清空缓存，避免旧题的选项顺序影响新题库
+        st.session_state.shuffled_options = {}
+        st.session_state.current = None
+        st.session_state.seen_ids = set()
 
     # callbacks keep effective filters in sync
     def on_change_qtype_sb():
@@ -123,6 +144,7 @@ with st.sidebar:
         st.session_state.seen_ids = set()
         st.session_state.history = []
         st.session_state.current = None
+        st.session_state.shuffled_options = {}
         st.success("抽题记录已重置。")
 
     # Export
@@ -183,6 +205,10 @@ if st.button("🎲 抽 1 题", use_container_width=True):
     else:
         st.session_state.current = row
         st.session_state.seen_ids.add(row["id"])
+        # 初始化该题的稳定选项顺序缓存
+        opts_raw = parse_options(row.get("options",""))
+        if opts_raw:
+            st.session_state.shuffled_options[row["id"]] = get_stable_options(row["id"], opts_raw)
 
 current = st.session_state.current
 if current:
@@ -197,19 +223,19 @@ if current:
     play_audio(current.get("audio_url",""))
 
     # Answer UI
-    options = parse_options(current.get("options",""))
+    raw_options = parse_options(current.get("options",""))
+    options = get_stable_options(current["id"], raw_options)
     user_answer = None
     if options:
-        if st.session_state.shuffle_opts:
-            random.shuffle(options)
-        user_answer = st.radio("请选择你的答案：", options, index=None)
+        # Unique key per question to keep radio state stable
+        user_answer = st.radio("请选择你的答案：", options, index=None, key=f"radio_{current['id']}")
     else:
         # open-ended
         placeholder = "在此输入……（主观题不自动判分）"
-        user_answer = st.text_area("你的答案：", height=120, placeholder=placeholder)
+        user_answer = st.text_area("你的答案：", height=120, placeholder=placeholder, key=f"text_{current['id']}")
 
     c1, c2, c3 = st.columns(3)
-    if c1.button("✅ 提交答案", use_container_width=True):
+    if c1.button("✅ 提交答案", use_container_width=True, key=f"submit_{current['id']}"):
         if user_answer is None or (isinstance(user_answer, str) and len(user_answer.strip())==0):
             st.warning("请先作答。")
         else:
@@ -232,10 +258,10 @@ if current:
                 None if is_correct is None else bool(is_correct)
             ])
 
-    if c2.button("👀 显示参考答案", use_container_width=True):
+    if c2.button("👀 显示参考答案", use_container_width=True, key=f"show_{current['id']}"):
         st.info(current.get("answer","（无参考答案）"))
 
-    if c3.button("➡️ 下一题", use_container_width=True):
+    if c3.button("➡️ 下一题", use_container_width=True, key=f"next_{current['id']}"):
         avoid = st.session_state.seen_ids if st.session_state.no_repeat else set()
         row = draw_one(pool, avoid)
         if row is None:
@@ -243,7 +269,11 @@ if current:
         else:
             st.session_state.current = row
             st.session_state.seen_ids.add(row["id"])
+            # 初始化新题的稳定选项顺序
+            opts_raw = parse_options(row.get("options",""))
+            if opts_raw:
+                st.session_state.shuffled_options[row["id"]] = get_stable_options(row["id"], opts_raw)
 
 # Footer
 st.markdown("---")
-st.caption("移动端优化版本 · 题型支持：red/green/yellow/blue · 支持音频/图片/短文 · 题库 CSV 可通过侧边栏或上方控件筛选。")
+st.caption("移动端优化版本 · 修复了“无法选择答案（重复打乱导致控件失去状态）” · 题型支持：red/green/yellow/blue。")
