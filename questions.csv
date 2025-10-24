@@ -1,0 +1,7 @@
+id,type,question,options,answer,audio_url,image_url,passage,difficulty,tags
+R001,red,请听音频，选择正确答案。,今天的天气怎么样？||今天天气很好。||今天下雨了。||今天很冷。,今天天气很好。,https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3,,,easy,"HSK2,天气"
+R002,red,请听音频并判断对/错：说话人周末要去旅行。,对||错,对,https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3,,,medium,"旅游,判断题"
+G001,green,她在找什么？,她在找书店。||她在找饭店。||她在找银行。,她在找书店。,,,一个女孩第一次来到这座城市，她想买一本词典，于是问路人：请问，书店怎么走？,easy,"方向,问路,HSK2"
+G002,green,根据短文判断对错：小王昨天去图书馆借书。,对||错,错,,,小王每周三都会去图书馆借书，但这周他周三有课，所以改到周四去了。,medium,"时间,判断题"
+Y001,yellow,图片理解：这是什么交通工具？,飞机||火车||轮船,飞机,,https://upload.wikimedia.org/wikipedia/commons/5/5d/Airplane_silhouette.png,,easy,"图片,识别"
+B001,blue,请根据提示写一句话：主题“学习中文”，使用“因为……所以……”。,,示例：因为我喜欢中国文化，所以我决定学习中文。,,,,easy,"句型,连词"
