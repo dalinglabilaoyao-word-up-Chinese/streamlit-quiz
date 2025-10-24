@@ -221,19 +221,18 @@ with st.sidebar:
         st.session_state.shuffled_options = {}
         st.success("抽题记录已重置。")
 
-    # Desktop export
-    if st.session_state.history:
-        hist = pd.DataFrame(st.session_state.history,
-                            columns=["time","id","type","question","user_answer","correct_answer","correct"])
-        st.download_button("⬇️ 导出作答记录 CSV（桌面）",
-                           hist.to_csv(index=False).encode("utf-8-sig"),
-                           file_name="history.csv", mime="text/csv")
+    # Desktop export (always visible)
+    hist_df = pd.DataFrame(st.session_state.history,
+                           columns=["time","id","type","question","user_answer","correct_answer","correct"])
+    st.download_button("⬇️ 导出作答记录 CSV（桌面）",
+                       hist_df.to_csv(index=False).encode("utf-8-sig"),
+                       file_name="history.csv", mime="text/csv")
 
 # =====================================
 # Main UI (mobile quick controls)
 # =====================================
 st.title(APP_TITLE)
-st.caption("说明：支持分级题库自动汇总；手机端也可导出作答记录。")
+st.caption("说明：支持分级题库自动汇总；手机端也可导出作答记录，并在下方表格实时查看作答。")
 
 st.markdown("### 📱 移动端快速选择")
 col1, col2 = st.columns(2)
@@ -265,21 +264,18 @@ remaining_count = max(0, total_count - seen_in_pool)
 st.subheader("🎲 抽题区")
 st.caption(f"题目数量：{total_count}　已抽取：{seen_in_pool}　剩余：{remaining_count}")
 
-# Main reset button (mobile-friendly)
-col_reset1, col_reset2 = st.columns([1,2])
-with col_reset1:
+# Main reset + mobile export
+c0, c1 = st.columns([1,2])
+with c0:
     if st.button("♻️ 重置题目", use_container_width=True):
         st.session_state.seen_ids = set()
         st.session_state.current = None
         st.session_state.shuffled_options = {}
         st.success("已重置当前筛选下的抽题状态。")
-with col_reset2:
-    if st.session_state.history:
-        hist = pd.DataFrame(st.session_state.history,
-                            columns=["time","id","type","question","user_answer","correct_answer","correct"])
-        st.download_button("⬇️ 导出作答记录 CSV（手机端）",
-                           hist.to_csv(index=False).encode("utf-8-sig"),
-                           file_name="history.csv", mime="text/csv")
+with c1:
+    st.download_button("⬇️ 导出作答记录 CSV（手机端）",
+                       pd.DataFrame(st.session_state.history, columns=["time","id","type","question","user_answer","correct_answer","correct"]).to_csv(index=False).encode("utf-8-sig"),
+                       file_name="history.csv", mime="text/csv")
 
 # Draw controls
 def ensure_stable_options_for(row):
@@ -358,5 +354,25 @@ if current:
             st.session_state.seen_ids.add(str(row["id"]))
             ensure_stable_options_for(row)
 
+# =====================================
+# Live results table (always visible)
+# =====================================
+st.markdown("## 📊 实时作答结果")
+hist_cols = ["time","id","type","question","user_answer","correct_answer","correct"]
+hist_df = pd.DataFrame(st.session_state.history, columns=hist_cols)
+# A small toolbar
+col_a, col_b, col_c = st.columns([1,1,2])
+with col_a:
+    if st.button("🧹 清空记录"):
+        st.session_state.history = []
+        st.success("已清空历史记录。")
+with col_b:
+    st.download_button("⬇️ 导出 CSV",
+                       hist_df.to_csv(index=False).encode("utf-8-sig"),
+                       file_name="history.csv", mime="text/csv")
+with col_c:
+    st.caption(f"记录条数：{len(hist_df)}")
+st.dataframe(hist_df, use_container_width=True, height=280)
+
 st.markdown("---")
-st.caption("题型 red/green/yellow/blue · 难度 1–10 下拉多选 · 显示已抽取/剩余数量 · 主界面支持“重置题目”。")
+st.caption("题型 red/green/yellow/blue · 难度 1–10 下拉多选 · 实时表格显示作答结果。")
