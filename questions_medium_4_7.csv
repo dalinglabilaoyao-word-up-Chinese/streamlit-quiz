@@ -1,5 +1,0 @@
-﻿id,type,question,options,answer,audio_url,image_url,passage,difficulty,tags
-Q004,blue,请用“因为……所以……”写一句话（主题：学习中文）。,,示例：因为我喜欢中国文化，所以我决定学习中文。,,,,4,"写作,句型"
-Q005,red,听录音并判断：说话人周末要去旅行。,对||错,对,https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3,,,5,"听力,判断题"
-Q006,green,根据短文判断：小王本周三去了图书馆。,对||错,错,,,小王每周三会去图书馆，但这周三有课，他改在周四去了。,6,"阅读,判断题"
-Q007,yellow,选择正确的量词：一___书。,本||只||个||张,本,,,,7,"语法,量词"
