@@ -4,6 +4,43 @@ import time
 import random
 import pandas as pd
 import streamlit as st
+import re
+
+def _gdrive_direct_url(url: str, kind: str = "image") -> str:
+    """
+    把 Google Drive 链接转成可直接访问的直链。
+    kind: "image" 用 export=view（或 thumbnail），"audio" 用 export=download。
+    """
+    if not url or "drive.google.com" not in url:
+        return url
+
+    s = str(url)
+    file_id = None
+
+    # 匹配常见三种写法
+    m = re.search(r"/file/d/([a-zA-Z0-9_-]{20,})", s)
+    if m:
+        file_id = m.group(1)
+    if not file_id:
+        m = re.search(r"[?&]id=([a-zA-Z0-9_-]{20,})", s)
+        if m:
+            file_id = m.group(1)
+    if not file_id:
+        m = re.search(r"/uc\?export=\w+&id=([a-zA-Z0-9_-]{20,})", s)
+        if m:
+            file_id = m.group(1)
+
+    if not file_id:
+        return url  # 实在取不到就返回原链接
+
+    if kind == "image":
+        # 更稳：用 export=view；如果你更想要缩略图可换成 thumbnail 那行
+        return f"https://drive.google.com/uc?export=view&id={file_id}"
+        # return f"https://drive.google.com/thumbnail?id={file_id}&sz=w1600"
+    else:  # "audio" / "file"
+        # 音频/文件用下载直链更可靠
+        return f"https://drive.google.com/uc?export=download&id={file_id}"
+
 
 # =====================================
 # Page setup
@@ -91,8 +128,11 @@ def draw_one(df, avoid_ids):
     return pool.sample(1).iloc[0].to_dict()
 
 def play_audio(src: str):
-    if not src: return
+    if not src: 
+        return
     src = str(src).strip()
+    if "drive.google.com" in src:
+        src = _gdrive_direct_url(src, kind="audio")
     if src.startswith("http"):
         st.audio(src)
     else:
@@ -102,11 +142,15 @@ def play_audio(src: str):
         except Exception as e:
             st.warning(f"音频无法读取：{src} ({e})")
 
+
 def show_image(src: str):
-    if not src: return
+    if not src: 
+        return
     src = str(src).strip()
+    if "drive.google.com" in src:
+        src = _gdrive_direct_url(src, kind="image")
     if src.startswith("http") or os.path.exists(src):
-        st.image(src, use_column_width=True)
+        st.image(src, use_container_width=True)
     else:
         st.warning(f"图片未找到：{src}")
 
